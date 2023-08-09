@@ -1,131 +1,104 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.0;
 
-contract Sport {
-    uint256 bet1 = 0;
-    uint256 bet2 = 0;
-    uint256 bet0 = 0;
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-    address public deltaTokenAddress; // Address of the "delta" token contract
+contract OddsCalculator is ReentrancyGuard, Ownable { 
+    uint256 public odds1;
+    uint256 public odds2;
+    uint256 public odds0;
 
-    bool public isBettingOpen = true; // Flag to indicate if betting is still open
-    uint256 public closingTime; // Timestamp when betting will be closed
-
-    uint256 public winnerTeam; // Team that wins after betting is closed
-    bool public hasResult = false; // Flag to indicate if the result is determined
-
-    mapping(address => uint256) public userBets; // Mapping to store user bets
-
-    constructor(address _deltaTokenAddress, uint256 _closingTime) {
-        deltaTokenAddress = _deltaTokenAddress;
-        closingTime = _closingTime;
+    struct Bet {
+        uint256 choice;
+        uint256 amount;
     }
 
-    function placeBet(uint256 _bet, uint256 _team) public payable {
+    uint public totalBets1;
+    uint public totalBets2;
+    uint public totalBets0;
+
+    uint256 public bettedAmount1 = totalBets1 * odds1;
+    uint256 public bettedAmount2 = totalBets2 * odds2;
+    uint256 public bettedAmount0 = totalBets0 * odds0;
+
+    address public USDCTokenAddress;
+    bool public isBettingOpen = true;
+    uint256 public winnerTeam;
+    bool public hasResult = false;
+
+    mapping(address => Bet[]) public userBets;
+
+    mapping(address => uint) public personalPlacedBets1;
+    mapping(address => uint) public personalPlacedBets2;
+    mapping(address => uint) public personalPlacedBets0;
+
+
+    constructor(uint256 _odds1, uint256 _odds2, uint256 _odds0, address _USDCTokenAddress) {
+        odds1 = _odds1;
+        odds2 = _odds2;
+        odds0 = _odds0;
+        USDCTokenAddress = _USDCTokenAddress;
+    }
+
+    function placeBet(uint256 _amount, uint256 _choice) public payable nonReentrant {
         require(isBettingOpen, "Betting is closed");
-        require(block.timestamp < closingTime, "Betting time has passed");
         require(
-            IERC20(deltaTokenAddress).balanceOf(msg.sender) >= _bet,
-            "Not enough delta tokens"
+            IERC20(USDCTokenAddress).balanceOf(msg.sender) >= _amount,
+            "Not enough tokens"
         );
 
-        if (_team == 1) {
-            bet1 += _bet;
-        } else if (_team == 2) {
-            bet2 += _bet;
-        } else if (_team == 0) {
-            bet0 += _bet;
+        Bet memory newBet = Bet({ choice: _choice, amount: _amount });
+        userBets[msg.sender].push(newBet);
+
+        if (_choice == 1) {
+            personalPlacedBets1[msg.sender] += _amount;
+            totalBets1 += _amount;
+        } else if (_choice == 2) {
+            personalPlacedBets2[msg.sender] += _amount;
+            totalBets2 += _amount;
+
+        } else if (_choice == 0) {
+            personalPlacedBets0[msg.sender] += _amount;
+            totalBets0 += _amount;
+
         } else {
             revert("Invalid bet");
         }
+        IERC20(USDCTokenAddress).transferFrom(address(msg.sender),address(this), _amount);
 
-        // Save the bet for the user
-        userBets[msg.sender] += _bet;
-
-        // Transfer the "delta" tokens from the sender to this contract for the bet
-        IERC20(deltaTokenAddress).transferFrom(msg.sender, address(this), _bet);
     }
-
-    function closeBetting(uint256 _winnerTeam) public {
-        require(isBettingOpen, "Betting is already closed");
-        require(block.timestamp >= closingTime, "Betting time has not passed yet");
-        require(_winnerTeam == 0 || _winnerTeam == 1 || _winnerTeam == 2, "Invalid team");
-
+    /*function finalizeBetsAndRefund() public onlyOwner {
         isBettingOpen = false;
-        winnerTeam = _winnerTeam;
-        hasResult = true;
-    }
 
-    function distributeWinnings() public {
-        require(!isBettingOpen, "Betting is still open");
-        require(hasResult, "Result is not determined yet");
+        if (bettedAmount1 <= bettedAmount2 && bettedAmount1 <= bettedAmount0) {
+            bettedAmount2 -
 
-        uint betted1 = bet1 * 167 / 100;
-        uint betted2 = bet2 * 419 / 100;
-        uint betted0 = bet0 * 603 / 100;
+        } else if (bettedAmount2 <= bettedAmount1 && bettedAmount2 <= bettedAmount0) {
 
-        if (betted1 <= betted2 & betted0) {
-            uint total1 = betted1;
-            uint total = betted1 * 14142 / 10000;
-            
-            uint total2 = total * 23834 / 100000;
-            uint total0 = total * 1658 / 10000;
-
-            uint cashback2 = bet2 - total2;
-            uint cashback0 = bet0 - total0;
-        } else if (betted2 <= betted1 & betted0) {
-            uint total2 = betted2;
-            uint total = betted2 * 176166 / 100000;
-            
-            uint total1 = total * 59585 / 100000;
-            uint total0 = total * 1658 / 10000;
-
-            uint cashback1 = bet1 - total1;
-            uint cashback0 = bet0 - total0;
-        }  else {
-            uint total0 = betted0;
-            uint total = betted0 * 18342 / 10000;
-
-            uint total1 = total * 59585 / 100000;
-            uint total2 = total * 23834 / 100000;
-
-            uint cashback1 = bet1 - total1;
-            uint cashback2 = bet2 - total2;
-        }
-////hasta aqui de momento.
-        uint256 totalBets = bet1 + bet2 + bet0;
-        require(totalBets > 0, "No bets placed");
-
-        uint256 totalWinningBets;
-        uint256 winnerBetAmount;
-        if (winnerTeam == 1) {
-            totalWinningBets = bet1;
-            winnerBetAmount = totalBets * 167 / 100;
-        } else if (winnerTeam == 2) {
-            totalWinningBets = bet2;
-            winnerBetAmount = totalBets * 419 / 100;
         } else {
-            totalWinningBets = bet0;
-            winnerBetAmount = totalBets * 603 / 100;
+
         }
 
-        require(totalWinningBets > 0, "No bets on the winning team");
+    } */
 
-        for (uint256 i = 0; i < bets.length; i++) {
-            address bettor = bets[i].bettor;
-            uint256 userBetAmount = userBets[bettor];
-
-            if (bets[i].team == winnerTeam) {
-                uint256 winnings = (userBetAmount * winnerBetAmount) / totalWinningBets;
-                IERC20(deltaTokenAddress).transfer(bettor, winnings);
-            }
-        }
+    function getBetCount(address _user) public view returns (uint256) {
+        return userBets[_user].length;
     }
-}
 
-// Interface for the "delta" token contract
+    function getBetDetails(address _user, uint256 _index) public view returns (uint256 choice, uint256 amount) {
+        Bet storage bet = userBets[_user][_index];
+        return (bet.choice, bet.amount);
+    }
+
+    //function refund()
+
+        
+}
+    
+
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
-
-    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
 }
