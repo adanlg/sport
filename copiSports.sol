@@ -30,6 +30,9 @@ contract OddsCalculator is ReentrancyGuard, Ownable {
 
     mapping(address => Bet[]) public userBets;
     Bet[] public allBets; // Array to store all bets
+    
+    mapping(address => uint256) public contributionPercentages;
+
 
     mapping(address => uint) public personalPlacedBets1;
     mapping(address => uint) public personalPlacedBets2;
@@ -74,7 +77,7 @@ contract OddsCalculator is ReentrancyGuard, Ownable {
     }
 
 
-    function getChoiceSums() public view returns (uint256 smallestChoice,uint256 lastBetIndex, uint256 product1, uint256 product2, uint256 product0) {
+    function getSmallestChoiceAndLastBetIndex() public view returns (uint256 smallestChoice,uint256 lastBetIndex, uint256 product1, uint256 product2, uint256 product0) {
         uint256 sumChoice1;
         uint256 sumChoice2;
         uint256 sumChoice0;
@@ -117,25 +120,66 @@ contract OddsCalculator is ReentrancyGuard, Ownable {
 
 
 
-    /*function finalizeBetsAndRefund() public onlyOwner {
+    function finalizeBetsAndRefund() public onlyOwner {
+        require(!hasResult, "Bets are already finalized");
         isBettingOpen = false;
-        getChoiceSums();
+        uint256 lastBetIndex;
+        (, lastBetIndex, , ,) = getSmallestChoiceAndLastBetIndex();
 
-        if (bettedAmount1 <= bettedAmount2 && bettedAmount1 <= bettedAmount0) {
-            uint returnsTo2 = bettedAmount2 - bettedAmount1;
-            uint returnsTo0 = bettedAmount0 - bettedAmount1;
+        // Refund tokens for bets made after lastBetIndex
+        for (uint256 i = lastBetIndex + 1; i < allBets.length; i++) {
+            Bet memory bet = allBets[i];
+            uint256 refundAmount = bet.amount;
+            IERC20(USDCTokenAddress).transferFrom(address(this),bet.bettor, refundAmount);
+        }
+    }
 
-            
-        } else if (bettedAmount2 <= bettedAmount1 && bettedAmount2 <= bettedAmount0) {
-            uint returnsTo1 = bettedAmount1 - bettedAmount2;
-            uint returnsTo0 = bettedAmount0 - bettedAmount2;
+    function winner(uint256 _choice) public onlyOwner {
+        require(!isBettingOpen, "Open bets");
+        require(_choice == 0 || _choice == 1 || _choice == 2, "Invalid choice");
 
+        hasResult = true;
 
-        } else {
-            uint returnsTo1 = bettedAmount1 - bettedAmount0;
-            uint returnsTo2 = bettedAmount2 - bettedAmount0;
-            } 
-    }*/
+        uint256 smallestChoice;
+        uint256 lastBetIndex;
+        (smallestChoice, lastBetIndex, , ,) = getSmallestChoiceAndLastBetIndex();
+
+        
+        // Calculate the total contribution to the smallestChoice
+        uint256 totalContributedAmount = 0;
+        
+        for (uint256 i = 0; i <= lastBetIndex; i++) {
+            if (allBets[i].choice == _choice) {
+                totalContributedAmount += allBets[i].amount;
+            }
+        }
+        emit TotalContributedAmount(totalContributedAmount);
+        // Calculate and store the contribution percentage for each address
+        
+        for (uint256 i = 0; i <= lastBetIndex; i++) {
+            if (allBets[i].choice == _choice) {
+                uint256 contributionPercentage = (allBets[i].amount * 100) / totalContributedAmount;
+                contributionPercentages[allBets[i].bettor] = contributionPercentage;
+                emit ContributionPercentage(allBets[i].bettor, contributionPercentage);
+            }
+        }
+        
+        // Calculate the total tokens in the contract
+        uint256 totalTokensInContract = IERC20(USDCTokenAddress).balanceOf(address(this));
+        
+        // Distribute tokens to winners according to their contribution percentages
+        for (uint256 i = 0; i <= lastBetIndex; i++) {
+            if (allBets[i].choice == _choice) {
+                uint256 tokensToTransfer = (totalTokensInContract * contributionPercentages[allBets[i].bettor]) / 100;
+                emit TokensTransferred(allBets[i].bettor, tokensToTransfer);
+                IERC20(USDCTokenAddress).transferFrom(address(this),allBets[i].bettor, tokensToTransfer);
+            }
+        }
+    }
+    event TotalContributedAmount(uint256 totalAmount);
+    event ContributionPercentage(address indexed bettor, uint256 percentage);
+    event TokensTransferred(address indexed bettor, uint256 tokens);
+
     function getBetCount(address _user) public view returns (uint256) {
         return userBets[_user].length;
     }
