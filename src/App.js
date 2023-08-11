@@ -1,43 +1,47 @@
 import React, { useEffect, useState } from 'react';
-//import getBlockchain from './ethereum.js';
 import { TokenAddress, TokenABI, ContractAddress, ContractABI } from './globalVariables.js';
 
 const { ethers } = require("ethers");
-
 
 function App() {
   const [amount, setAmount] = useState(0);
   const [choice, setChoice] = useState(0);
 
   useEffect(() => {
-    const init = async () => {
-      //const { signerAddress } = await getBlockchain();
-      // Hacer algo con signerAddress si es necesario
-    };
-    init();
+    // No es necesario el bloque "init" ya que no necesitas obtener una dirección de MetaMask aquí
   }, []);
 
   const connectToContract = async () => {
     if (typeof window.ethereum !== 'undefined') {
-      // MetaMask está instalado
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = provider.getSigner();
-
-      const contract = new ethers.Contract(ContractAddress, ContractABI, signer);
-      const tokenContract = new ethers.Contract(TokenAddress, TokenABI, signer);
-
       try {
-        // Realizar la aprobación del token
-        const approveTx = await tokenContract.approve(ContractAddress, amount);
-        await approveTx.wait();
-        console.log('Token approval successful!');
+        // Solicitar al usuario que autorice la conexión
+        await window.ethereum.enable();
+        
+        // Crear el proveedor y el signer
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        
+        console.log(ethers.version);
+        console.log(await provider.listAccounts());
 
-        // Llamar a la función placeBet
-        const betTx = await contract.placeBet(amount, choice);
-        await betTx.wait();
-        console.log('Bet placed successfully!');
+        const contract = new ethers.Contract(ContractAddress, ContractABI, signer);
+        const tokenContract = new ethers.Contract(TokenAddress, TokenABI, signer);
+
+        try {
+          // Realizar la aprobación del token
+          const approveTx = await tokenContract.approve(ContractAddress, amount);
+          await approveTx.wait();
+          console.log('Token approval successful!');
+
+          // Llamar a la función placeBet
+          const betTx = await contract.placeBet(amount, choice);
+          await betTx.wait();
+          console.log('Bet placed successfully!');
+        } catch (error) {
+          console.error('Error placing bet:', error);
+        }
       } catch (error) {
-        console.error('Error placing bet:', error);
+        console.error('Error connecting to MetaMask:', error);
       }
     } else {
       // MetaMask no está instalado o habilitado
